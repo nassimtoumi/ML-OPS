@@ -1,7 +1,7 @@
 from kfp import dsl
 from kfp import compiler
 
-# Composant de prétraitement des données (fourni par l'utilisateur)
+# Data Processing Component
 @dsl.container_component
 def data_processing(
     file_path: str,
@@ -14,7 +14,7 @@ def data_processing(
     minio_bucket: str = ''
 ):
     return dsl.ContainerSpec(
-        image='nassimtoumi98/data_processing:2.0.1',
+        image='alpine',
         command=["/app/venv/bin/python", "data_processing.py"],
         args=[
             '--file_path', file_path,
@@ -28,7 +28,7 @@ def data_processing(
         ]
     )
 
-# Composant d'entraînement du modèle
+# Model Training Component
 @dsl.container_component
 def model_training(
     minio_endpoint: str,
@@ -38,37 +38,38 @@ def model_training(
     train_file: str,
     valid_file: str,
     save_model_path: str,
-    logdir: str = 'tb_logs',
-    epochs: int = 10,
-    batch_size: int = 64,
-    learning_rate: float = 1e-3,
-    load_model_from: str = None,  # Set default to None
+    logdir: str,
+    epochs: int,
+    batch_size: int,
+    learning_rate: float,
 ):
-    args = [
-        '--minio_endpoint', minio_endpoint,
-        '--minio_access_key', minio_access_key,
-        '--minio_secret_key', minio_secret_key,
-        '--minio_bucket', minio_bucket,
-        '--train_file', train_file,
-        '--valid_file', valid_file,
-        '--save_model_path', save_model_path,
-        '--logdir', logdir,
-        '--epochs', str(epochs),
-        '--batch_size', str(batch_size),
-        '--learning_rate', str(learning_rate),
-    ]
-    
-    # Only include load_model_from if it’s not None
-    if load_model_from:
-        args.extend(['--load_model_from', load_model_from])
-
     return dsl.ContainerSpec(
-        image='nassimtoumi98/model_training:3.0.6',  # Remplacez par votre image Docker
-        command=["python", "train.py"],
-        args=args
+        image='tensorflow:2.9.1',
+        command=["python", "model_training.py"],
+        args=[
+            '--minio_endpoint', minio_endpoint,
+            '--minio_access_key', minio_access_key,
+            '--minio_secret_key', minio_secret_key,
+            '--minio_bucket', minio_bucket,
+            '--train_file', train_file,
+            '--valid_file', valid_file,
+            '--save_model_path', save_model_path,
+            '--logdir', logdir,
+            '--epochs', str(epochs),
+            '--batch_size', str(batch_size),
+            '--learning_rate', str(learning_rate)
+        ]
     )
 
-# Pipeline de traitement des données et d'entraînement
+# Model Evaluation Component
+@dsl.container_component
+def model_evaluation():
+    return dsl.ContainerSpec(
+        image='python:3.9',
+        command=["python", "model_evaluation.py"]
+    )
+
+# Pipeline Definition
 @dsl.pipeline(name="data-processing-and-model-training-pipeline")
 def data_processing_and_model_training_pipeline(
     file_path: str,
@@ -85,7 +86,7 @@ def data_processing_and_model_training_pipeline(
     learning_rate: float = 1e-3,
     save_model_path: str = '/tmp/model.ckpt',
 ):
-    # Étape de prétraitement des données
+    # Data Processing
     data_processing_step = data_processing(
         file_path=file_path,
         save_json_path=save_json_path,
@@ -97,8 +98,8 @@ def data_processing_and_model_training_pipeline(
         minio_bucket=minio_bucket,
     )
 
-    # Étape d'entraînement du modèle
-    model_training(
+    # Model Training
+    model_training_step = model_training(
         minio_endpoint=minio_endpoint,
         minio_access_key=minio_access_key,
         minio_secret_key=minio_secret_key,
@@ -112,8 +113,19 @@ def data_processing_and_model_training_pipeline(
         learning_rate=learning_rate,
     )
 
+    # Model Evaluation
+    model_evaluation_step = model_evaluation(
+                file_path=file_path,
+        save_json_path=save_json_path,
+        percent=percent,
+        convert=convert,
+        minio_endpoint=minio_endpoint,
+        minio_access_key=minio_access_key,
+        minio_secret_key=minio_secret_key,
+        minio_bucket=minio_bucket,
+    )
 
-# Compilation du pipeline
+# Compile Pipeline
 if __name__ == "__main__":
     compiler.Compiler().compile(
         pipeline_func=data_processing_and_model_training_pipeline,
