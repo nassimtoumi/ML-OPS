@@ -1,0 +1,28 @@
+# PIPELINE DEFINITION
+# Name: hello-world-pipeline
+components:
+  comp-say-hello1:
+    executorLabel: exec-say-hello1
+deploymentSpec:
+  executors:
+    exec-say-hello1:
+      container:
+        args:
+        - Hellhfhfo
+        command:
+        - echo
+        image: alpine
+pipelineInfo:
+  name: hello-world-pipeline
+root:
+  dag:
+    tasks:
+      say-hello1:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-say-hello1
+        taskInfo:
+          name: say-hello1
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.9.0

@@ -1,0 +1,350 @@
+# PIPELINE DEFINITION
+# Name: enhanced-data-processing-pipeline
+# Description: Pipeline to process data, train and evaluate model.
+# Inputs:
+#    file_path: str
+#    minio_access_key: str
+#    minio_bucket: str
+#    minio_endpoint: str
+#    minio_secret_key: str
+#    model_save_path: str
+#    save_json_path: str
+components:
+  comp-data-processing-component:
+    executorLabel: exec-data-processing-component
+    inputDefinitions:
+      parameters:
+        convert:
+          defaultValue: true
+          isOptional: true
+          parameterType: BOOLEAN
+        file_path:
+          parameterType: STRING
+        minio_access_key:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        minio_bucket:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        minio_endpoint:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        minio_secret_key:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        percent:
+          defaultValue: 10.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        save_json_path:
+          parameterType: STRING
+  comp-evaluation-component:
+    executorLabel: exec-evaluation-component
+    inputDefinitions:
+      parameters:
+        evaluation_data_path:
+          parameterType: STRING
+        model_path:
+          parameterType: STRING
+  comp-minio-connection-component:
+    executorLabel: exec-minio-connection-component
+    inputDefinitions:
+      parameters:
+        minio_access_key:
+          parameterType: STRING
+        minio_bucket:
+          parameterType: STRING
+        minio_endpoint:
+          parameterType: STRING
+        minio_secret_key:
+          parameterType: STRING
+  comp-training-component:
+    executorLabel: exec-training-component
+    inputDefinitions:
+      parameters:
+        model_save_path:
+          parameterType: STRING
+        training_data_path:
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-data-processing-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - data_processing_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.9.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'minio' 'pydub'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef data_processing_component(\n    file_path: str,             \
+          \  # Relative path in MinIO to the .tsv file\n    save_json_path: str, \
+          \          # Path in MinIO to save JSON files\n    percent: int = 10,\n\
+          \    convert: bool = True,\n    minio_endpoint: str = \"\",\n    minio_access_key:\
+          \ str = \"\",\n    minio_secret_key: str = \"\",\n    minio_bucket: str\
+          \ = \"\"\n):\n    import json\n    import random\n    import csv\n    from\
+          \ pydub import AudioSegment\n    from minio import Minio\n    from minio.error\
+          \ import S3Error\n    import os\n\n    # Initialize MinIO client\n    minio_client\
+          \ = Minio(\n        minio_endpoint,\n        access_key=minio_access_key,\n\
+          \        secret_key=minio_secret_key,\n        secure=False  # Change to\
+          \ True if using HTTPS\n    )\n\n    # Download the source .tsv file from\
+          \ MinIO\n    local_file_path = \"/tmp/\" + os.path.basename(file_path)\n\
+          \    minio_client.fget_object(minio_bucket, file_path, local_file_path)\n\
+          \    print(f\"Downloaded {file_path} from MinIO.\")\n\n    # Process the\
+          \ .tsv file\n    data = []\n    directory = os.path.dirname(local_file_path)\n\
+          \n    with open(local_file_path, newline='') as csvfile:\n        reader\
+          \ = csv.DictReader(csvfile, delimiter='\\t')\n        total_lines = sum(1\
+          \ for _ in open(local_file_path))\n        index = 1\n        for row in\
+          \ reader:\n            file_name = row['path']\n            text = row['sentence']\n\
+          \            wav_filename = file_name.rpartition('.')[0] + \".wav\" if convert\
+          \ else file_name\n            audio_path = os.path.join(\"/tmp\", \"clips\"\
+          , wav_filename)\n\n            # Convert to WAV if needed\n            if\
+          \ convert:\n                print(f\"Converting file {index}/{total_lines}\
+          \ to wav\")\n                mp3_path = os.path.join(\"/tmp\", \"clips\"\
+          , file_name)\n                # Download mp3 file from MinIO\n         \
+          \       minio_client.fget_object(minio_bucket, f\"clips/{file_name}\", mp3_path)\n\
+          \                sound = AudioSegment.from_mp3(mp3_path)\n             \
+          \   sound.export(audio_path, format=\"wav\")\n\n            data.append({\"\
+          key\": audio_path, \"text\": text})\n            index += 1\n\n    # Shuffle\
+          \ and split data for train/test\n    random.shuffle(data)\n    train_data\
+          \ = data[: int(len(data) * (1 - percent / 100))]\n    test_data = data[int(len(data)\
+          \ * (1 - percent / 100)) :]\n\n    # Save JSON files for training and testing\n\
+          \    train_json_path = \"/tmp/train.json\"\n    test_json_path = \"/tmp/test.json\"\
+          \n\n    with open(train_json_path, \"w\") as f:\n        for entry in train_data:\n\
+          \            f.write(json.dumps(entry) + \"\\n\")\n\n    with open(test_json_path,\
+          \ \"w\") as f:\n        for entry in test_data:\n            f.write(json.dumps(entry)\
+          \ + \"\\n\")\n\n    print(\"Data processing complete. Training and testing\
+          \ JSON files created.\")\n\n    # Upload JSON files back to MinIO\n    minio_client.fput_object(minio_bucket,\
+          \ os.path.join(save_json_path, \"train.json\"), train_json_path)\n    minio_client.fput_object(minio_bucket,\
+          \ os.path.join(save_json_path, \"test.json\"), test_json_path)\n    print(f\"\
+          JSON files uploaded to {save_json_path} in MinIO.\")\n\n"
+        image: nassimtoumi98/data_processing:latest
+    exec-evaluation-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluation_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.9.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluation_component(\n    model_path: str,\n    evaluation_data_path:\
+          \ str\n):\n    print(\"Evaluating the model located at:\", model_path)\n\
+          \    print(\"Using evaluation data from:\", evaluation_data_path)\n    #\
+          \ Evaluation logic goes here\n\n"
+        image: nassimtoumi98/data_processing:latest
+    exec-minio-connection-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - minio_connection_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.9.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'minio' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef minio_connection_component(\n    minio_endpoint: str,\n    minio_access_key:\
+          \ str,\n    minio_secret_key: str,\n    minio_bucket: str\n):\n    from\
+          \ minio import Minio\n    from minio.error import S3Error\n\n    try:\n\
+          \        # Initialize MinIO client\n        minio_client = Minio(\n    \
+          \        minio_endpoint,\n            access_key=minio_access_key,\n   \
+          \         secret_key=minio_secret_key,\n            secure=False  # Change\
+          \ to True if using HTTPS\n        )\n\n        # Check if bucket exists\n\
+          \        if not minio_client.bucket_exists(minio_bucket):\n            minio_client.make_bucket(minio_bucket)\n\
+          \        print(\"Connected to MinIO and bucket is ready!\")\n\n    except\
+          \ S3Error as e:\n        print(f\"MinIO error: {e}\")\n    except Exception\
+          \ as e:\n        print(f\"Unexpected error: {e}\")\n\n"
+        image: nassimtoumi98/data_processing:latest
+    exec-training-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - training_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.9.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef training_component(\n    training_data_path: str,\n    model_save_path:\
+          \ str\n):\n    print(\"Training the model with data from:\", training_data_path)\n\
+          \    print(\"Saving model to:\", model_save_path)\n    # Training logic\
+          \ goes here\n\n"
+        image: nassimtoumi98/data_processing:latest
+pipelineInfo:
+  description: Pipeline to process data, train and evaluate model.
+  name: enhanced-data-processing-pipeline
+root:
+  dag:
+    tasks:
+      data-processing-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-data-processing-component
+        dependentTasks:
+        - minio-connection-component
+        inputs:
+          parameters:
+            convert:
+              runtimeValue:
+                constant: true
+            file_path:
+              componentInputParameter: file_path
+            minio_access_key:
+              componentInputParameter: minio_access_key
+            minio_bucket:
+              componentInputParameter: minio_bucket
+            minio_endpoint:
+              componentInputParameter: minio_endpoint
+            minio_secret_key:
+              componentInputParameter: minio_secret_key
+            percent:
+              runtimeValue:
+                constant: 10.0
+            save_json_path:
+              componentInputParameter: save_json_path
+        taskInfo:
+          name: data-processing-component
+      evaluation-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-evaluation-component
+        dependentTasks:
+        - training-component
+        inputs:
+          parameters:
+            evaluation_data_path:
+              runtimeValue:
+                constant: '{{$.inputs.parameters[''pipelinechannel--save_json_path'']}}/test.json'
+            model_path:
+              componentInputParameter: model_save_path
+            pipelinechannel--save_json_path:
+              componentInputParameter: save_json_path
+        taskInfo:
+          name: evaluation-component
+      minio-connection-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-minio-connection-component
+        inputs:
+          parameters:
+            minio_access_key:
+              componentInputParameter: minio_access_key
+            minio_bucket:
+              componentInputParameter: minio_bucket
+            minio_endpoint:
+              componentInputParameter: minio_endpoint
+            minio_secret_key:
+              componentInputParameter: minio_secret_key
+        taskInfo:
+          name: minio-connection-component
+      training-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-training-component
+        dependentTasks:
+        - data-processing-component
+        inputs:
+          parameters:
+            model_save_path:
+              componentInputParameter: model_save_path
+            pipelinechannel--save_json_path:
+              componentInputParameter: save_json_path
+            training_data_path:
+              runtimeValue:
+                constant: '{{$.inputs.parameters[''pipelinechannel--save_json_path'']}}/train.json'
+        taskInfo:
+          name: training-component
+  inputDefinitions:
+    parameters:
+      file_path:
+        parameterType: STRING
+      minio_access_key:
+        parameterType: STRING
+      minio_bucket:
+        parameterType: STRING
+      minio_endpoint:
+        parameterType: STRING
+      minio_secret_key:
+        parameterType: STRING
+      model_save_path:
+        parameterType: STRING
+      save_json_path:
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.9.0

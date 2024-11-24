@@ -1,0 +1,130 @@
+# PIPELINE DEFINITION
+# Name: data-processing-pipeline
+# Inputs:
+#    convert: bool [Default: True]
+#    file_path: str
+#    minio_access_key: str [Default: '']
+#    minio_bucket: str [Default: '']
+#    minio_endpoint: str [Default: '']
+#    minio_secret_key: str [Default: '']
+#    percent: int [Default: 10.0]
+#    save_json_path: str
+components:
+  comp-data-processing:
+    executorLabel: exec-data-processing
+    inputDefinitions:
+      parameters:
+        convert:
+          defaultValue: true
+          isOptional: true
+          parameterType: BOOLEAN
+        file_path:
+          parameterType: STRING
+        minio_access_key:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        minio_bucket:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        minio_endpoint:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        minio_secret_key:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        percent:
+          defaultValue: 10.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        save_json_path:
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-data-processing:
+      container:
+        args:
+        - --file_path
+        - '{{$.inputs.parameters[''file_path'']}}'
+        - --save_json_path
+        - '{{$.inputs.parameters[''save_json_path'']}}'
+        - --percent
+        - '{{$.inputs.parameters[''percent'']}}'
+        - --convert
+        - --minio_endpoint
+        - '{{$.inputs.parameters[''minio_endpoint'']}}'
+        - --minio_access_key
+        - '{{$.inputs.parameters[''minio_access_key'']}}'
+        - --minio_secret_key
+        - '{{$.inputs.parameters[''minio_secret_key'']}}'
+        - --minio_bucket
+        - '{{$.inputs.parameters[''minio_bucket'']}}'
+        command:
+        - /app/venv/bin/python
+        - data_processing.py
+        image: nassimtoumi98/data_processing:2.0.1
+pipelineInfo:
+  name: data-processing-pipeline
+root:
+  dag:
+    tasks:
+      data-processing:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-data-processing
+        inputs:
+          parameters:
+            convert:
+              componentInputParameter: convert
+            file_path:
+              componentInputParameter: file_path
+            minio_access_key:
+              componentInputParameter: minio_access_key
+            minio_bucket:
+              componentInputParameter: minio_bucket
+            minio_endpoint:
+              componentInputParameter: minio_endpoint
+            minio_secret_key:
+              componentInputParameter: minio_secret_key
+            percent:
+              componentInputParameter: percent
+            save_json_path:
+              componentInputParameter: save_json_path
+        taskInfo:
+          name: data-processing
+  inputDefinitions:
+    parameters:
+      convert:
+        defaultValue: true
+        isOptional: true
+        parameterType: BOOLEAN
+      file_path:
+        parameterType: STRING
+      minio_access_key:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
+      minio_bucket:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
+      minio_endpoint:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
+      minio_secret_key:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
+      percent:
+        defaultValue: 10.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      save_json_path:
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.9.0

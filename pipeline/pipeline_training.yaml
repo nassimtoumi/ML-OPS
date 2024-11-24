@@ -1,0 +1,250 @@
+# PIPELINE DEFINITION
+# Name: data-processing-and-model-training-pipeline
+# Inputs:
+#    batch_size: int [Default: 64.0]
+#    convert: bool [Default: True]
+#    epochs: int [Default: 10.0]
+#    file_path: str
+#    learning_rate: float [Default: 0.001]
+#    logdir: str [Default: 'tb_logs']
+#    minio_access_key: str
+#    minio_bucket: str
+#    minio_endpoint: str
+#    minio_secret_key: str
+#    percent: int [Default: 10.0]
+#    save_json_path: str
+#    save_model_path: str [Default: '/tmp/model.ckpt']
+components:
+  comp-data-processing:
+    executorLabel: exec-data-processing
+    inputDefinitions:
+      parameters:
+        convert:
+          defaultValue: true
+          isOptional: true
+          parameterType: BOOLEAN
+        file_path:
+          parameterType: STRING
+        minio_access_key:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        minio_bucket:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        minio_endpoint:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        minio_secret_key:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        percent:
+          defaultValue: 10.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        save_json_path:
+          parameterType: STRING
+  comp-model-training:
+    executorLabel: exec-model-training
+    inputDefinitions:
+      parameters:
+        batch_size:
+          defaultValue: 64.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        epochs:
+          defaultValue: 10.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        learning_rate:
+          defaultValue: 0.001
+          isOptional: true
+          parameterType: NUMBER_DOUBLE
+        load_model_from:
+          isOptional: true
+          parameterType: STRING
+        logdir:
+          defaultValue: tb_logs
+          isOptional: true
+          parameterType: STRING
+        minio_access_key:
+          parameterType: STRING
+        minio_bucket:
+          parameterType: STRING
+        minio_endpoint:
+          parameterType: STRING
+        minio_secret_key:
+          parameterType: STRING
+        save_model_path:
+          parameterType: STRING
+        train_file:
+          parameterType: STRING
+        valid_file:
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-data-processing:
+      container:
+        args:
+        - --file_path
+        - '{{$.inputs.parameters[''file_path'']}}'
+        - --save_json_path
+        - '{{$.inputs.parameters[''save_json_path'']}}'
+        - --percent
+        - '{{$.inputs.parameters[''percent'']}}'
+        - --convert
+        - --minio_endpoint
+        - '{{$.inputs.parameters[''minio_endpoint'']}}'
+        - --minio_access_key
+        - '{{$.inputs.parameters[''minio_access_key'']}}'
+        - --minio_secret_key
+        - '{{$.inputs.parameters[''minio_secret_key'']}}'
+        - --minio_bucket
+        - '{{$.inputs.parameters[''minio_bucket'']}}'
+        command:
+        - /app/venv/bin/python
+        - data_processing.py
+        image: nassimtoumi98/data_processing:2.0.1
+    exec-model-training:
+      container:
+        args:
+        - --minio_endpoint
+        - '{{$.inputs.parameters[''minio_endpoint'']}}'
+        - --minio_access_key
+        - '{{$.inputs.parameters[''minio_access_key'']}}'
+        - --minio_secret_key
+        - '{{$.inputs.parameters[''minio_secret_key'']}}'
+        - --minio_bucket
+        - '{{$.inputs.parameters[''minio_bucket'']}}'
+        - --train_file
+        - '{{$.inputs.parameters[''train_file'']}}'
+        - --valid_file
+        - '{{$.inputs.parameters[''valid_file'']}}'
+        - --save_model_path
+        - '{{$.inputs.parameters[''save_model_path'']}}'
+        - --logdir
+        - '{{$.inputs.parameters[''logdir'']}}'
+        - --epochs
+        - '{{$.inputs.parameters[''epochs'']}}'
+        - --batch_size
+        - '{{$.inputs.parameters[''batch_size'']}}'
+        - --learning_rate
+        - '{{$.inputs.parameters[''learning_rate'']}}'
+        - --load_model_from
+        - '{{$.inputs.parameters[''load_model_from'']}}'
+        command:
+        - python
+        - train.py
+        image: nassimtoumi98/model_training:3.0.6
+pipelineInfo:
+  name: data-processing-and-model-training-pipeline
+root:
+  dag:
+    tasks:
+      data-processing:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-data-processing
+        inputs:
+          parameters:
+            convert:
+              componentInputParameter: convert
+            file_path:
+              componentInputParameter: file_path
+            minio_access_key:
+              componentInputParameter: minio_access_key
+            minio_bucket:
+              componentInputParameter: minio_bucket
+            minio_endpoint:
+              componentInputParameter: minio_endpoint
+            minio_secret_key:
+              componentInputParameter: minio_secret_key
+            percent:
+              componentInputParameter: percent
+            save_json_path:
+              componentInputParameter: save_json_path
+        taskInfo:
+          name: data-processing
+      model-training:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-model-training
+        inputs:
+          parameters:
+            batch_size:
+              componentInputParameter: batch_size
+            epochs:
+              componentInputParameter: epochs
+            learning_rate:
+              componentInputParameter: learning_rate
+            logdir:
+              componentInputParameter: logdir
+            minio_access_key:
+              componentInputParameter: minio_access_key
+            minio_bucket:
+              componentInputParameter: minio_bucket
+            minio_endpoint:
+              componentInputParameter: minio_endpoint
+            minio_secret_key:
+              componentInputParameter: minio_secret_key
+            pipelinechannel--save_json_path:
+              componentInputParameter: save_json_path
+            save_model_path:
+              componentInputParameter: save_model_path
+            train_file:
+              runtimeValue:
+                constant: '{{$.inputs.parameters[''pipelinechannel--save_json_path'']}}/train.json'
+            valid_file:
+              runtimeValue:
+                constant: '{{$.inputs.parameters[''pipelinechannel--save_json_path'']}}/test.json'
+        taskInfo:
+          name: model-training
+  inputDefinitions:
+    parameters:
+      batch_size:
+        defaultValue: 64.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      convert:
+        defaultValue: true
+        isOptional: true
+        parameterType: BOOLEAN
+      epochs:
+        defaultValue: 10.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      file_path:
+        parameterType: STRING
+      learning_rate:
+        defaultValue: 0.001
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      logdir:
+        defaultValue: tb_logs
+        isOptional: true
+        parameterType: STRING
+      minio_access_key:
+        parameterType: STRING
+      minio_bucket:
+        parameterType: STRING
+      minio_endpoint:
+        parameterType: STRING
+      minio_secret_key:
+        parameterType: STRING
+      percent:
+        defaultValue: 10.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      save_json_path:
+        parameterType: STRING
+      save_model_path:
+        defaultValue: /tmp/model.ckpt
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.9.0

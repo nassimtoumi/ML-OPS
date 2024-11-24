@@ -1,0 +1,33 @@
+version: "3.8"
+
+services:
+  main-app:
+    build:
+      context: .
+      dockerfile: Dockerfile  # Your Dockerfile for the main application
+    image: nassimtoumi98/data_processing:1.0.2  # Tag the image for Docker Hub
+    volumes:
+      - ffmpeg_bin:/usr/local/bin/ffmpeg  # Mount the ffmpeg executable
+      - ffprobe_bin:/usr/local/bin/ffprobe  # Mount the ffprobe executable
+    environment:
+      - FFMPEG_PATH=/usr/local/bin/ffmpeg
+      - FFPROBE_PATH=/usr/local/bin/ffprobe
+    depends_on:
+      - ffmpeg
+      - ffprobe
+
+  ffmpeg:
+    image: linuxserver/ffmpeg
+    command: /bin/sh -c "cp /usr/bin/ffmpeg /ffmpeg_bin/ffmpeg"  # Copy ffmpeg executable
+    volumes:
+      - ffmpeg_bin:/ffmpeg_bin
+
+  ffprobe:
+    image: dorftv/ffprobe
+    command: /bin/sh -c "cp /usr/bin/ffprobe /ffprobe_bin/ffprobe"  # Copy ffprobe executable
+    volumes:
+      - ffprobe_bin:/ffprobe_bin
+
+volumes:
+  ffmpeg_bin:
+  ffprobe_bin:
